@@ -2,9 +2,11 @@
 
 Ansible-driven setup for a new Mac: Homebrew packages and casks, Mac App Store apps, Dock layout, shell tooling (Oh My Zsh, fonts, plugins), and system defaults via `defaults` in `os.sh`.
 
+The **golden-gate** branch targets **macOS 27 Golden Gate** (Apple Silicon). System apps live under `/System/Applications` (no `/Applications` shims except Safari), and `os.sh` uses Golden Gate preference keys for Liquid Glass, Spotlight, and Finder.
+
 ## Prerequisites
 
-- **macOS** (this repo assumes **Apple Silicon** and Homebrew at `/opt/homebrew`, matching `init.sh`.)
+- **macOS 27 Golden Gate** (this repo assumes **Apple Silicon** and Homebrew at `/opt/homebrew`, matching `init.sh`.)
 - **Full Disk Access for Terminal** before you run `update.sh`, or the playbook cannot read protected paths. Open **System Settings → Privacy & Security → Full Disk Access**, add **Terminal**, then restart Terminal if needed.
 
 ## Quick start

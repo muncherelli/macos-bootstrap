@@ -12,6 +12,8 @@
       - Freeform
       - Games
       - iPhone Mirroring
+      - Image Playground
+      - Journal
       - Launchpad
       - Maps
       - Music
@@ -19,7 +21,9 @@
       - Notes
       - Phone
       - Photos
+      - Passwords
       - Reminders
+      - "Siri AI"
       - "System Settings"
       - TV
     dockitems_persist:
@@ -30,13 +34,13 @@
         path: "/Applications/Brave Browser.app"
         pos: 2
       - name: "Messages"
-        path: "/Applications/Messages.app"
+        path: "/System/Applications/Messages.app"
         pos: 3
       - name: "Mail"
-        path: "/Applications/Mail.app"
+        path: "/System/Applications/Mail.app"
         pos: 4
       - name: "Terminal"
-        path: "/Applications/Utilities/Terminal.app"
+        path: "/System/Applications/Utilities/Terminal.app"
         pos: 5
       - name: "ChatGPT"
         path: "/Applications/ChatGPT.app"
@@ -57,7 +61,7 @@
         path: "/Applications/Windows App.app"
         pos: 11
       - name: "Screen Sharing"
-        path: "/Applications/Utilities/Screen Sharing.app"
+        path: "/System/Applications/Utilities/Screen Sharing.app"
         pos: 12
 
     homebrew_installed_packages:

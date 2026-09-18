@@ -1,18 +1,23 @@
 #!/bin/bash
+# macOS 27 Golden Gate system defaults. Applied from playbook.yml via ./update.sh.
 
 ###############################################################################
 # General UI/UX                                                               #
 ###############################################################################
 
-# Appearance (macOS Tahoe 26.1+): Liquid Glass → Tinted.
-# System Settings writes NSGlassDiffusionSetting (true = Tinted, false = Clear).
+# Appearance (macOS Golden Gate 27): Liquid Glass → fully tinted.
+# System Settings → Appearance → Liquid Glass is a slider (ultra-clear → tinted).
+# NSGlassTintAmount is 0.0 (clear) … 1.0 (fully tinted). NSGlassDiffusionSetting is
+# the older Tahoe boolean (true = Tinted); keep it so both code paths agree.
+defaults write NSGlobalDomain NSGlassTintAmount -float 1
+defaults write NSGlobalDomain NSGlassEverEditedInSettings -bool true
 defaults write NSGlobalDomain NSGlassDiffusionSetting -bool true
 
-# Appearance (macOS Tahoe+): Icon & widget style → Dark (Always).
+# Appearance (macOS Tahoe+ / Golden Gate): Icon & widget style → Dark (Always).
 # Values: RegularAutomatic, RegularLight, RegularDark, Clear*, Tinted*.
 defaults write NSGlobalDomain AppleIconAppearanceTheme -string RegularDark
 
-# Notify running UI that icon appearance changed (Dock picks this up after killall too).
+# Notify running UI that icon / glass appearance changed (Dock picks this up after killall too).
 osascript -l JavaScript -e '
 ObjC.import("Foundation");
 var nc = $.NSDistributedNotificationCenter.defaultCenter;
@@ -20,6 +25,8 @@ nc.postNotificationNameObjectUserInfoDeliverImmediately(
   $("AppleIconAppearanceThemeChangedNotification"), null, null, true);
 nc.postNotificationNameObjectUserInfoDeliverImmediately(
   $("AppleInterfaceThemeChangedNotification"), null, null, true);
+nc.postNotificationNameObjectUserInfoDeliverImmediately(
+  $("NSGlassEffectDiffusionDidChangeNotification"), null, null, true);
 ' >/dev/null 2>&1 || true
 
 # expand save panel by default
@@ -52,12 +59,17 @@ defaults write com.apple.menuextra.clock ShowDate -int 2
 # # # Finder                                                                      #
 # # ###############################################################################
 
+# Finder writes its in-memory prefs back on quit, which can clobber `defaults write`.
+# Stop it first so the keys below actually stick on Golden Gate.
+osascript -e 'tell application "Finder" to quit' 2>/dev/null || killall Finder 2>/dev/null || true
+sleep 1
+
 # Finder: new windows open in your home directory (General → "New Finder windows show").
 defaults write com.apple.finder NewWindowTarget -string PfLo
 defaults write com.apple.finder NewWindowTargetPath -string "file://${HOME}"
 
-# Finder: show hidden files by default
-# TO-DO
+# Finder: show hidden files by default (Finder Settings → Advanced).
+defaults write com.apple.finder AppleShowAllFiles -bool true
 
 # finder: show all filename extensions
 defaults write NSGlobalDomain "AppleShowAllExtensions" -bool "true"
@@ -73,7 +85,9 @@ defaults write com.apple.finder ShowExternalHardDrivesOnDesktop -bool false
 
 # Finder: default view for folders without a saved per-folder style (List = Nlsv).
 # Other codes: icnv icon, clmv column, glyv gallery, Flwv (legacy cover flow).
+# FXPreferredSearchViewStyle covers Spotlight-in-Finder / search windows.
 defaults write com.apple.finder FXPreferredViewStyle -string Nlsv
+defaults write com.apple.finder FXPreferredSearchViewStyle -string Nlsv
 
 # show the ~/Library folder because we aren't nubs
 chflags nohidden ~/Library
@@ -82,7 +96,9 @@ chflags nohidden ~/Library
 defaults write com.apple.WindowManager EnableStandardClickToShowDesktop -bool false
 
 # disable desktop widgets (System Settings → Desktop & Dock → Show Widgets → On Desktop).
+# WindowManager is the Sonoma+ key; Dock's show-desktop-widgets is what Desktop Settings writes.
 defaults write com.apple.WindowManager StandardHideWidgets -bool true
+defaults write com.apple.dock show-desktop-widgets -bool false
 
 # # ###############################################################################
 # # # Mouse, Keyboard, Trackpad, and Input                                        #
@@ -114,14 +130,19 @@ defaults write NSGlobalDomain NSAutomaticCapitalizationEnabled -bool false
 # # ###############################################################################
 
 # Spotlight → Apps only (System Settings → Spotlight).
-# Tahoe stores disabled result sources in EnabledPreferenceRules (a denylist despite
-# the name). Items absent from the list stay on — so Apps is left out on purpose.
+# Golden Gate still stores disabled result sources in EnabledPreferenceRules (a
+# denylist despite the name). Items absent from the list stay on — so Apps is
+# left out on purpose.
 # Custom.relatedContents = "Show Related Content". System.* = Results from System
-# (except Apps). Bundle IDs = Results from Apps toggles.
+# (except Apps). Golden Gate adds clipboard history, documents, and oneness
+# (iPhone / Continuity) apps. Bundle IDs = Results from Apps toggles.
 defaults write com.apple.Spotlight EnabledPreferenceRules -array \
   "Custom.relatedContents" \
   "System.files" \
   "System.folders" \
+  "System.documents" \
+  "System.clipboardHistory" \
+  "System.onenessApps" \
   "System.iphoneApps" \
   "System.menuItems" \
   "com.apple.AppStore" \
@@ -196,20 +217,31 @@ safari_container_plist="${HOME}/Library/Containers/com.apple.Safari/Data/Library
 osascript -e 'quit app "Safari"' 2>/dev/null || true
 sleep 1
 
-if [[ ! -f "$safari_container_plist" ]]; then
+# -e (exists) not -f: without Full Disk Access, -f / PlistBuddy can miss the
+# container file and PlistBuddy will create an empty decoy plist.
+if [[ ! -e "$safari_container_plist" ]]; then
   open -gj -a Safari 2>/dev/null || true
   sleep 3
   osascript -e 'quit app "Safari"' 2>/dev/null || true
   sleep 1
 fi
 
+# POSIX -r/-w can pass while TCC still blocks the open(2). Probe with a real write.
+safari_container_writable=false
+if defaults write "$safari_container_plist" IncludeDevelopMenu -bool true 2>/dev/null; then
+  safari_container_writable=true
+else
+  echo "Safari container prefs are not writable. Grant Terminal Full Disk Access and re-run to apply Safari settings." >&2
+fi
+
 safari_set_bool() {
   local key=$1 val=$2
-  defaults write com.apple.Safari "$key" -bool "$val"
-  if [[ -f "$safari_container_plist" ]]; then
-    if ! /usr/libexec/PlistBuddy -c "Set :${key} ${val}" "$safari_container_plist" 2>/dev/null; then
-      /usr/libexec/PlistBuddy -c "Add :${key} bool ${val}" "$safari_container_plist" 2>/dev/null || true
-    fi
+  if [[ "$safari_container_writable" == true ]]; then
+    # Golden Gate routes the com.apple.Safari domain into this container file.
+    defaults write "$safari_container_plist" "$key" -bool "$val"
+  else
+    # Host-domain write is redirected to the container too, and fails without FDA.
+    defaults write com.apple.Safari "$key" -bool "$val" 2>/dev/null || true
   fi
 }
 
@@ -248,11 +280,14 @@ end tell
 EOF
 fi
 
-# reload finder
-killall Finder
+# Flush cached prefs so UI processes relaunch against the values we just wrote.
+killall cfprefsd 2>/dev/null || true
+
+# SIGKILL so Finder cannot flush stale in-memory view settings over our writes.
+killall -9 Finder 2>/dev/null || true
 
 # reload dock
-killall Dock
+killall Dock 2>/dev/null || true
 
 # apply menu bar clock prefs (Ventura+)
 killall ControlCenter 2>/dev/null || true
@@ -260,5 +295,6 @@ killall ControlCenter 2>/dev/null || true
 # apply desktop widget prefs (Sonoma+)
 killall WindowManager 2>/dev/null || true
 
-# apply Spotlight search-result category prefs
+# apply Spotlight search-result category prefs (mds + Golden Gate Spotlight UI)
 killall mds 2>/dev/null || true
+killall Spotlight 2>/dev/null || true
