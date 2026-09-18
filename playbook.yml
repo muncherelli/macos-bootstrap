@@ -66,10 +66,16 @@
 
     homebrew_installed_packages:
       - btop
+      - iperf3
       - mas
+      - nvm
+      - tree
       - wget
+
     homebrew_cask_apps:
+      - balenaetcher
       - brave-browser
+      - claude-code
       - chatgpt
       - cursor
       - discord
@@ -77,6 +83,7 @@
       - github
       - font-victor-mono
       - keka
+      - pgadmin4
       - plex
       - sublime-text
       - transmit
@@ -84,8 +91,13 @@
       - winbox
 
     mas_installed_apps:
+      - { id: 1560048103, name: 'DefleMask' }
       - { id: 1543920362, name: "Displaperture" }
+      - { id: 949582631, name: "HDHomeRun" }
+      - { id: 1518036000, name: "Sequel Ace" }
+      - { id: 985614903, name: "SQLPro Studio" }
       - { id: 1295203466, name: "Windows App" }
+
     mas_uninstalled_apps: []
 
   pre_tasks:
