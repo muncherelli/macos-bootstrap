@@ -363,6 +363,10 @@
       failed_when: false
       when: gui_session
 
+    - name: Restart Handoff
+      ansible.builtin.command: killall useractivityd
+      failed_when: false
+
     - name: Restart Dock
       ansible.builtin.command: killall Dock
       failed_when: false

@@ -278,6 +278,29 @@
     - Restart Dock
 
 ###############################################################################
+# Handoff                                                                     #
+###############################################################################
+
+# System Settings → General → AirDrop & Handoff → "Allow Handoff between this
+# Mac and your iCloud devices" off. Stops the extra icon that appears at the end
+# of the Dock when an app is open on another Apple device. These per-host keys
+# are the long-standing ones; not confirmed on macOS 27.
+- name: Handoff off (no icons in the Dock from other devices)
+  community.general.osx_defaults:
+    domain: com.apple.coreservices.useractivityd
+    host: currentHost
+    key: "{{ item }}"
+    type: bool
+    value: false
+  loop:
+    - ActivityAdvertisingAllowed
+    - ActivityReceivingAllowed
+  notify:
+    - Flush preferences cache
+    - Restart Handoff
+    - Restart Dock
+
+###############################################################################
 # Safari                                                                      #
 ###############################################################################
 
