@@ -1,0 +1,333 @@
+---
+# macOS 27 Golden Gate system defaults.
+#
+# Each group notifies the handler for the process that has to restart to pick
+# the settings up, so a service is only restarted when one of its settings
+# actually changed. Handlers live in playbook.yml.
+
+###############################################################################
+# General UI/UX                                                               #
+###############################################################################
+
+# Liquid Glass (System Settings → Appearance) is a slider, ultra-clear → tinted.
+# NSGlassTintAmount is 0.0 (clear) … 1.0 (fully tinted). NSGlassDiffusionSetting
+# is the older Tahoe boolean (true = Tinted); kept so both code paths agree.
+# AppleIconAppearanceTheme: RegularAutomatic, RegularLight, RegularDark, Clear*, Tinted*.
+- name: Appearance (Liquid Glass fully tinted, dark icons)
+  community.general.osx_defaults:
+    domain: NSGlobalDomain
+    key: "{{ item.key }}"
+    type: "{{ item.type }}"
+    value: "{{ item.value }}"
+  loop:
+    - { key: NSGlassTintAmount, type: float, value: 1 }
+    - { key: NSGlassEverEditedInSettings, type: bool, value: true }
+    - { key: NSGlassDiffusionSetting, type: bool, value: true }
+    - { key: AppleIconAppearanceTheme, type: string, value: RegularDark }
+  loop_control:
+    label: "{{ item.key }}"
+  notify:
+    - Flush preferences cache
+    - Announce appearance change
+    - Restart Dock
+
+- name: Save panels, printing, spelling and text input
+  community.general.osx_defaults:
+    domain: "{{ item.domain | default('NSGlobalDomain') }}"
+    key: "{{ item.key }}"
+    type: bool
+    value: "{{ item.value }}"
+  loop:
+    # expand save panel by default
+    - { key: NSNavPanelExpandedStateForSaveMode, value: true }
+    - { key: NSNavPanelExpandedStateForSaveMode2, value: true }
+    # automatically quit printer app once the print jobs complete
+    - { domain: com.apple.print.PrintingPrefs, key: "Quit When Finished", value: true }
+    # Edit → Spelling and Grammar: all three toggles off, plus auto-capitalization
+    - { key: NSAllowContinuousSpellChecking, value: false }
+    - { key: NSGrammarCheckingEnabled, value: false }
+    - { key: NSAutomaticSpellingCorrectionEnabled, value: false }
+    - { key: NSAutomaticCapitalizationEnabled, value: false }
+  loop_control:
+    label: "{{ item.key }}"
+  notify: Flush preferences cache
+
+# Menu bar clock: time only (no weekday, no date). ShowDate 2 = Never.
+- name: Menu bar clock
+  community.general.osx_defaults:
+    domain: com.apple.menuextra.clock
+    key: "{{ item.key }}"
+    type: "{{ item.type }}"
+    value: "{{ item.value }}"
+  loop:
+    - { key: ShowDayOfWeek, type: bool, value: false }
+    - { key: ShowDate, type: int, value: 2 }
+  loop_control:
+    label: "{{ item.key }}"
+  notify:
+    - Flush preferences cache
+    - Restart Control Center
+
+###############################################################################
+# Finder                                                                      #
+###############################################################################
+
+# Finder writes its in-memory prefs back when it quits normally, which would
+# clobber these. The "Restart Finder" handler uses SIGKILL so it cannot.
+# View style codes: Nlsv list, icnv icon, clmv column, glyv gallery.
+- name: Finder
+  community.general.osx_defaults:
+    domain: "{{ item.domain | default('com.apple.finder') }}"
+    key: "{{ item.key }}"
+    type: "{{ item.type | default('bool') }}"
+    value: "{{ item.value }}"
+  loop:
+    # new windows open in the home directory
+    - { key: NewWindowTarget, type: string, value: PfLo }
+    - { key: NewWindowTargetPath, type: string, value: "file://{{ ansible_facts['env']['HOME'] }}" }
+    - { key: AppleShowAllFiles, value: true }
+    - { domain: NSGlobalDomain, key: AppleShowAllExtensions, value: true }
+    - { key: ShowStatusBar, value: true }
+    - { key: ShowExternalHardDrivesOnDesktop, value: false }
+    # default view for folders and for search windows: list
+    - { key: FXPreferredViewStyle, type: string, value: Nlsv }
+    - { key: FXPreferredSearchViewStyle, type: string, value: Nlsv }
+  loop_control:
+    label: "{{ item.key }}"
+  notify:
+    - Flush preferences cache
+    - Restart Finder
+
+- name: Show the ~/Library folder
+  ansible.builtin.command: chflags nohidden "{{ ansible_facts['env']['HOME'] }}/Library"
+  changed_when: false
+
+# Click-desktop-to-show-desktop only in Stage Manager; no desktop widgets.
+- name: Desktop and Stage Manager
+  community.general.osx_defaults:
+    domain: com.apple.WindowManager
+    key: "{{ item.key }}"
+    type: bool
+    value: "{{ item.value }}"
+  loop:
+    - { key: EnableStandardClickToShowDesktop, value: false }
+    - { key: StandardHideWidgets, value: true }
+  loop_control:
+    label: "{{ item.key }}"
+  notify:
+    - Flush preferences cache
+    - Restart WindowManager
+
+###############################################################################
+# Mouse, Keyboard, Trackpad, and Input                                        #
+###############################################################################
+
+# Three-finger drag and tap to click, built-in and Magic Trackpad. May need a
+# log out and back in before the trackpad picks it up.
+- name: Trackpad
+  community.general.osx_defaults:
+    domain: "{{ item.0 }}"
+    key: "{{ item.1 }}"
+    type: bool
+    value: true
+  loop: >-
+    {{ ['com.apple.AppleMultitouchTrackpad', 'com.apple.driver.AppleBluetoothMultitouch.trackpad']
+       | product(['TrackpadThreeFingerDrag', 'Clicking']) | list }}
+  loop_control:
+    label: "{{ item.0 }} {{ item.1 }}"
+  notify: Flush preferences cache
+
+- name: Tap to click (current host)
+  community.general.osx_defaults:
+    domain: NSGlobalDomain
+    host: currentHost
+    key: com.apple.mouse.tapBehavior
+    type: int
+    value: 1
+  notify: Flush preferences cache
+
+###############################################################################
+# Spotlight                                                                   #
+###############################################################################
+
+# Spotlight → Apps only. EnabledPreferenceRules is a denylist despite the name:
+# anything absent from it stays on, so Apps is left out on purpose.
+# Custom.relatedContents = "Show Related Content". System.* = Results from
+# System. Bundle IDs = the per-app "Results from Apps" toggles.
+- name: Spotlight result sources (apps only)
+  community.general.osx_defaults:
+    domain: com.apple.Spotlight
+    key: EnabledPreferenceRules
+    type: array
+    value:
+      - Custom.relatedContents
+      - System.files
+      - System.folders
+      - System.documents
+      - System.clipboardHistory
+      - System.onenessApps
+      - System.iphoneApps
+      - System.menuItems
+      - com.apple.AppStore
+      - com.apple.iBooksX
+      - com.apple.calculator
+      - com.apple.iCal
+      - com.apple.AddressBook
+      - com.apple.Dictionary
+      - com.apple.mail
+      - com.apple.MobileSMS
+      - com.apple.Notes
+      - com.apple.mobilephone
+      - com.apple.Photos
+      - com.apple.podcasts
+      - com.apple.reminders
+      - com.apple.Safari
+      - com.apple.shortcuts
+      - com.apple.systempreferences
+      - com.apple.tips
+      - com.apple.VoiceMemos
+  notify:
+    - Flush preferences cache
+    - Restart Spotlight
+
+# Legacy orderedItems list: APPLICATIONS on, everything else off. It is an
+# array of dictionaries, which osx_defaults cannot write, so it is read, compared
+# and only rewritten when it differs.
+- name: Read Spotlight legacy categories
+  ansible.builtin.shell: |
+    set -o pipefail
+    defaults export com.apple.Spotlight - | plutil -extract orderedItems json -o - - 2>/dev/null || echo '[]'
+  args:
+    executable: /bin/bash
+  register: spotlight_ordered_items
+  changed_when: false
+  check_mode: false
+
+- name: Spotlight legacy categories (apps only)
+  ansible.builtin.command:
+    argv: "{{ ['defaults', 'write', 'com.apple.Spotlight', 'orderedItems', '-array'] + spotlight_wanted_plist }}"
+  vars:
+    spotlight_categories:
+      - APPLICATIONS
+      - MENU_EXPRESSION
+      - CONTACT
+      - MENU_CONVERSION
+      - MENU_DEFINITION
+      - DOCUMENTS
+      - EVENT_TODO
+      - DIRECTORIES
+      - FONTS
+      - IMAGES
+      - MESSAGES
+      - EMAIL
+      - MOVIES
+      - MUSIC
+      - MENU_OTHER
+      - PDF
+      - PRESENTATIONS
+      - SPREADSHEETS
+      - SYSTEM_PREFS
+      - BOOKMARKS
+      - SOURCE
+      - TIPS
+      - MENU_WEBSEARCH
+      - MENU_SPOTLIGHT_SUGGESTIONS
+    spotlight_wanted_plist: >-
+      {%- set out = [] -%}
+      {%- for name in spotlight_categories -%}
+      {%- set _ = out.append('{"enabled" = ' ~ (1 if loop.first else 0) ~ ';"name" = "' ~ name ~ '";}') -%}
+      {%- endfor -%}
+      {{ out }}
+  when: >-
+    (spotlight_ordered_items.stdout | from_json | map(attribute='name') | list) != spotlight_categories
+    or (spotlight_ordered_items.stdout | from_json | map(attribute='enabled') | map('int') | list)
+       != ([1] + [0] * (spotlight_categories | length - 1))
+  notify:
+    - Flush preferences cache
+    - Restart Spotlight
+
+###############################################################################
+# Dock and hot corners                                                        #
+###############################################################################
+
+- name: Dock (no recent apps, no desktop widgets)
+  community.general.osx_defaults:
+    domain: com.apple.dock
+    key: "{{ item }}"
+    type: bool
+    value: false
+  loop:
+    - show-recents
+    - show-desktop-widgets
+  notify:
+    - Flush preferences cache
+    - Restart Dock
+
+# 0 = no action (bottom-right defaults to Quick Note otherwise).
+- name: Hot corners off
+  community.general.osx_defaults:
+    domain: com.apple.dock
+    key: "wvous-{{ item.0 }}-{{ item.1 }}"
+    type: int
+    value: 0
+  loop: "{{ ['tl', 'tr', 'bl', 'br'] | product(['corner', 'modifier']) | list }}"
+  loop_control:
+    label: "wvous-{{ item.0 }}-{{ item.1 }}"
+  notify:
+    - Flush preferences cache
+    - Restart Dock
+
+###############################################################################
+# Safari                                                                      #
+###############################################################################
+
+# Safari is sandboxed and reads its prefs from the container plist, which is
+# only writable with Full Disk Access. Safari must not be running, or it writes
+# its own values back on quit.
+- name: Quit Safari
+  ansible.builtin.command: osascript -e 'quit app "Safari"'
+  changed_when: false
+  failed_when: false
+
+# The container plist does not exist until Safari has run once.
+- name: Launch Safari once so its preferences file exists
+  ansible.builtin.shell: |
+    open -gj -a Safari
+    sleep 3
+    osascript -e 'quit app "Safari"'
+    sleep 1
+  args:
+    creates: "{{ safari_plist }}"
+  failed_when: false
+
+- name: Safari settings
+  block:
+    - name: Safari
+      community.general.osx_defaults:
+        domain: "{{ item.domain | default(safari_plist) }}"
+        key: "{{ item.key }}"
+        type: bool
+        value: "{{ item.value }}"
+      loop:
+        # General → "Open safe files after downloading" off
+        - { key: AutoOpenSafeDownloads, value: false }
+        # AutoFill → everything off
+        - { key: AutoFillFromAddressBook, value: false }
+        - { key: AutoFillPasswords, value: false }
+        - { key: AutoFillCreditCardData, value: false }
+        - { key: AutoFillMiscellaneousForms, value: false }
+        # Advanced → "Show features for web developers" (needs both domains)
+        - { key: IncludeDevelopMenu, value: true }
+        - { domain: com.apple.Safari.SandboxBroker, key: ShowDevelopMenu, value: true }
+        # Advanced → "Show full website address"
+        - { key: ShowFullURLInSmartSearchField, value: true }
+      loop_control:
+        label: "{{ item.key }}"
+      notify: Flush preferences cache
+  rescue:
+    - name: Safari settings were not applied
+      ansible.builtin.debug:
+        msg: >-
+          Safari preferences are not writable. Grant Full Disk Access (Terminal,
+          or "Allow full disk access for remote users" under Remote Login when
+          running over SSH) and run ./install.sh again.

@@ -3,102 +3,37 @@
   hosts: localhost
 
   vars:
-    dockitems_remove:
-      - Apps
-      - "App Store"
-      - Calendar
-      - Contacts
-      - FaceTime
-      - Freeform
-      - Games
-      - iPhone Mirroring
-      - Image Playground
-      - Journal
-      - Launchpad
-      - Maps
-      - Music
-      - News
-      - Notes
-      - Phone
-      - Photos
-      - Passwords
-      - Reminders
-      - "Siri AI"
-      - "System Settings"
-      - TV
+    # Computer Name / HostName / LocalHostName. Empty = leave the name alone.
+    # Set it here, or per run:  ./install.sh -e computer_name=devbox
+    computer_name: ""
+
+    # Headless dev box: the Dock holds Safari and nothing else. Everything that
+    # is not Safari is stripped by the "Clear the Dock" pre-task below, so there
+    # is no remove list to maintain as macOS adds new default icons.
+    dockitems_remove: []
     dockitems_persist:
       - name: "Safari"
         path: "/Applications/Safari.app"
         pos: 1
-      - name: "Brave Browser"
-        path: "/Applications/Brave Browser.app"
-        pos: 2
-      - name: "Messages"
-        path: "/System/Applications/Messages.app"
-        pos: 3
-      - name: "Mail"
-        path: "/System/Applications/Mail.app"
-        pos: 4
-      - name: "Terminal"
-        path: "/System/Applications/Utilities/Terminal.app"
-        pos: 5
-      - name: "ChatGPT"
-        path: "/Applications/ChatGPT.app"
-        pos: 6
-      - name: "Cursor"
-        path: "/Applications/Cursor.app"
-        pos: 7
-      - name: "Sublime Text"
-        path: "/Applications/Sublime Text.app"
-        pos: 8
-      - name: "GitHub Desktop"
-        path: "/Applications/GitHub Desktop.app"
-        pos: 9
-      - name: "Transmit"
-        path: "/Applications/Transmit.app"
-        pos: 10
-      - name: "Windows App"
-        path: "/Applications/Windows App.app"
-        pos: 11
-      - name: "Screen Sharing"
-        path: "/System/Applications/Utilities/Screen Sharing.app"
-        pos: 12
 
     homebrew_installed_packages:
       - btop
+      - colima
+      - docker
+      - docker-compose
+      - gh
+      - go
       - iperf3
-      - mas
+      - jq
       - nvm
+      - rustup
       - tree
+      - uv
       - wget
 
-    homebrew_cask_apps:
-      - balenaetcher
-      - brave-browser
-      - claude-code
-      - chatgpt
-      - cursor
-      - discord
-      - docker
-      - github
-      - font-victor-mono
-      - keka
-      - pgadmin4
-      - plex
-      - sublime-text
-      - transmit
-      - vlc
-      - winbox
+    homebrew_cask_apps: []
 
-    mas_installed_apps:
-      - { id: 1560048103, name: 'DefleMask' }
-      - { id: 1543920362, name: "Displaperture" }
-      - { id: 949582631, name: "HDHomeRun" }
-      - { id: 1518036000, name: "Sequel Ace" }
-      - { id: 985614903, name: "SQLPro Studio" }
-      - { id: 1295203466, name: "Windows App" }
-
-    mas_uninstalled_apps: []
+    safari_plist: "{{ ansible_facts['env']['HOME'] }}/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist"
 
   pre_tasks:
     - name: dockutil utility
@@ -107,72 +42,77 @@
         name: dockutil
         state: present
 
-    - name: Check for Oh My Zsh installation
-      ansible.builtin.stat:
-        path: ~/.oh-my-zsh
-      register: oh_my_zsh_installed
-
-    - name: Check if mas is signed in
-      ansible.builtin.command: /opt/homebrew/bin/mas account
-      register: mas_account_check
-      changed_when: false
-      failed_when: false
+    - name: Clear the Dock (everything except Safari)
       become: false
-
-    #- name: Fail if mas is not signed in
-    #  ansible.builtin.fail:
-    #    msg: |
-    #      mas (Mac App Store CLI) is not signed in. Please sign in first by running:
-    #      mas signin your-apple-id@example.com
-    #
-    #      Or if you want to sign in interactively:
-    #      mas signin
-    #  when: mas_account_check.rc != 0
-    #  become: false
-
-    - name: Get current username
-      ansible.builtin.set_fact:
-        current_user: "{{ ansible_facts['env']['USER'] | default(ansible_facts['user_id']) }}"
-
-    - name: Configure passwordless sudo for mas
-      ansible.builtin.lineinfile:
-        path: /etc/sudoers.d/mas
-        line: "{{ current_user }} ALL=(ALL) NOPASSWD: /opt/homebrew/bin/mas"
-        create: yes
-        validate: "visudo -cf %s"
-        mode: "0440"
-      become: true
+      ansible.builtin.shell: |
+        set -o pipefail
+        /opt/homebrew/bin/dockutil --list | awk -F'\t' '$1 != "Safari" { print $1 }' |
+        while IFS= read -r item; do
+          /opt/homebrew/bin/dockutil --remove "$item" --no-restart </dev/null && echo "removed: $item"
+        done
+        exit 0
+      args:
+        executable: /bin/bash
+      register: dock_clear
+      changed_when: dock_clear.stdout != ""
+      notify: Restart Dock
 
   tasks:
+    - name: Homebrew on PATH for login shells
+      ansible.builtin.lineinfile:
+        path: "{{ ansible_facts['env']['HOME'] }}/.zprofile"
+        line: 'eval "$(/opt/homebrew/bin/brew shellenv)"'
+        create: yes
+        mode: "0644"
+
+    - name: Read current computer name
+      ansible.builtin.command: scutil --get {{ item }}
+      loop: [ComputerName, HostName, LocalHostName]
+      register: current_names
+      changed_when: false
+      failed_when: false # HostName is unset on a fresh Mac
+      check_mode: false
+      when: computer_name | length > 0
+
+    # HostName and LocalHostName cannot contain spaces or punctuation.
+    - name: Set computer name
+      become: true
+      ansible.builtin.command: scutil --set {{ item.item }} {{ wanted | quote }}
+      vars:
+        wanted: "{{ computer_name if item.item == 'ComputerName' else computer_name | regex_replace('[^A-Za-z0-9-]+', '-') }}"
+      loop: "{{ current_names.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item | default('') }}"
+      when:
+        - computer_name | length > 0
+        - item.stdout | default('') != wanted
+      notify: Flush DNS cache
+
     - name: Hush login
-      ansible.builtin.shell: touch ~/.hushlogin
+      ansible.builtin.file:
+        path: "{{ ansible_facts['env']['HOME'] }}/.hushlogin"
+        state: touch
+        modification_time: preserve
+        access_time: preserve
 
     - name: Oh My Zsh
-      ansible.builtin.shell: sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+      ansible.builtin.shell: sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
       args:
         creates: ~/.oh-my-zsh
       environment:
         PATH: "{{ ansible_facts['env']['PATH'] }}"
 
-    - name: MesloLGS NF Regular (font)
+    # Only needed when using Terminal on this Mac itself. Over SSH the font has
+    # to be installed on the machine you are connecting from.
+    - name: MesloLGS NF fonts
       ansible.builtin.get_url:
-        url: https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20Regular.ttf
-        dest: ~/Library/Fonts/MesloLGS NF Regular.ttf
-
-    - name: MesloLGS NF Bold (font)
-      ansible.builtin.get_url:
-        url: https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20Bold.ttf
-        dest: ~/Library/Fonts/MesloLGS NF Bold.ttf
-
-    - name: MesloLGS NF Italic (font)
-      ansible.builtin.get_url:
-        url: https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20Italic.ttf
-        dest: ~/Library/Fonts/MesloLGS NF Italic.ttf
-
-    - name: MesloLGS NF Bold Italic (font)
-      ansible.builtin.get_url:
-        url: https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20Bold%20Italic.ttf
-        dest: ~/Library/Fonts/MesloLGS NF Bold Italic.ttf
+        url: "https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20{{ item | replace(' ', '%20') }}.ttf"
+        dest: "~/Library/Fonts/MesloLGS NF {{ item }}.ttf"
+      loop:
+        - Regular
+        - Bold
+        - Italic
+        - Bold Italic
 
     - name: Powerlevel10k theme
       ansible.builtin.git:
@@ -187,80 +127,153 @@
         line: 'ZSH_THEME="powerlevel10k/powerlevel10k"'
         create: yes
 
-    # - name: SoundSource
-    #   ansible.builtin.shell: |
-    #     curl -o ~/Downloads/SoundSource.zip https://cdn.rogueamoeba.com/soundsource/download/SoundSource.zip && \
-    #     unzip -o ~/Downloads/SoundSource.zip -d /Applications/
-    #     rm ~/Downloads/SoundSource.zip
-    #   args:
-    #     creates: /Applications/SoundSource.app
-    #   environment:
-    #     PATH: "{{ ansible_facts['env']['PATH'] }}"
+    - name: macOS system defaults
+      ansible.builtin.import_tasks: tasks/macos.yml
+      tags: [macos]
 
-    # - name: Audio Hijack
-    #   ansible.builtin.shell: |
-    #     curl -o ~/Downloads/AudioHijack.zip https://cdn.rogueamoeba.com/audiohijack/download/AudioHijack.zip && \
-    #     unzip -o ~/Downloads/AudioHijack.zip -d /Applications/
-    #     rm ~/Downloads/AudioHijack.zip
-    #   args:
-    #     creates: /Applications/Audio Hijack.app
-    #   environment:
-    #     PATH: "{{ ansible_facts['env']['PATH'] }}"
+    # Restart the affected services now, not at the end of the play, so they
+    # have no time to write their old in-memory settings back over the new ones.
+    - name: Apply macOS defaults
+      ansible.builtin.meta: flush_handlers
+      tags: [macos]
 
-    # - name: Loopback
-    #   ansible.builtin.shell: |
-    #     curl -o ~/Downloads/Loopback.zip https://cdn.rogueamoeba.com/loopback/download/Loopback.zip && \
-    #     unzip -o ~/Downloads/Loopback.zip -d /Applications/
-    #     rm ~/Downloads/Loopback.zip
-    #   args:
-    #     creates: /Applications/Loopback.app
-    #   environment:
-    #     PATH: "{{ ansible_facts['env']['PATH'] }}"
+    # Keep the box reachable over SSH. -c = on mains power, which is the only
+    # power source on a desktop Mac. The display may still sleep.
+    - name: Never sleep; wake for network access
+      become: true
+      ansible.builtin.command: pmset -c sleep 0 disksleep 0 womp 1
+      changed_when: false
 
-    - name: Run OS Script
-      ansible.builtin.shell: ./os.sh
-      args:
-        chdir: "{{ playbook_dir }}"
+    - name: Start up automatically after a power failure
+      become: true
+      ansible.builtin.command: pmset -c autorestart 1
+      changed_when: false
+      failed_when: false # desktop Macs only; laptops have no such setting
 
-    - name: Clone zsh-autosuggestions repository
-      git:
-        repo: "https://github.com/zsh-users/zsh-autosuggestions"
-        dest: "{{ ansible_facts['env']['HOME'] }}/.oh-my-zsh/custom/plugins/zsh-autosuggestions"
+    - name: Restart automatically if the computer freezes
+      become: true
+      ansible.builtin.command: systemsetup -setrestartfreeze on
+      changed_when: false
+      failed_when: false # systemsetup reports a spurious error on recent macOS
+
+    - name: Zsh plugins
+      ansible.builtin.git:
+        repo: "https://github.com/zsh-users/{{ item }}"
+        dest: "{{ ansible_facts['env']['HOME'] }}/.oh-my-zsh/custom/plugins/{{ item }}"
         update: yes
+      loop:
+        - zsh-autosuggestions
+        - zsh-syntax-highlighting
 
-    - name: Ensure zsh-autosuggestions is added to plugins list in .zshrc
-      lineinfile:
-        path: "{{ ansible_facts['env']['HOME'] }}/.zshrc"
-        regexp: '^plugins=\('
-        line: "plugins=(git zsh-autosuggestions)"
-        state: present
-        backrefs: yes
-
-    - name: Clone zsh-syntax-highlighting repository
-      git:
-        repo: "https://github.com/zsh-users/zsh-syntax-highlighting.git"
-        dest: "{{ ansible_facts['env']['HOME'] }}/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting"
-        update: yes
-
-    - name: Ensure zsh-syntax-highlighting is added to plugins list in .zshrc
-      lineinfile:
+    - name: Enable zsh plugins in .zshrc
+      ansible.builtin.lineinfile:
         path: "{{ ansible_facts['env']['HOME'] }}/.zshrc"
         regexp: '^plugins=\('
         line: "plugins=(git zsh-autosuggestions zsh-syntax-highlighting)"
         state: present
         backrefs: yes
 
-    - name: Ensure nvm configuration is added to .zshrc
-      blockinfile:
+    - name: Dev toolchain shell configuration in .zshrc
+      ansible.builtin.blockinfile:
         path: "{{ ansible_facts['env']['HOME'] }}/.zshrc"
         block: |
+          # Node (nvm)
           export NVM_DIR="$HOME/.nvm"
-          [ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && \. "/opt/homebrew/opt/nvm/nvm.sh"  # This loads nvm
-          [ -s "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm" ] && \. "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm"  # This loads nvm bash_completion
-        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR NVM"
-      become: yes
+          [ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && \. "/opt/homebrew/opt/nvm/nvm.sh"
+          [ -s "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm" ] && \. "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm"
+          # Rust (rustup proxies, then cargo-installed binaries) and Go binaries
+          export PATH="$HOME/.cargo/bin:/opt/homebrew/opt/rustup/bin:$HOME/go/bin:$PATH"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR DEV TOOLCHAINS"
+
+    - name: nvm directory
+      ansible.builtin.file:
+        path: "{{ ansible_facts['env']['HOME'] }}/.nvm"
+        state: directory
+        mode: "0755"
+
+    - name: Node LTS via nvm
+      ansible.builtin.shell: |
+        export NVM_DIR="$HOME/.nvm"
+        . /opt/homebrew/opt/nvm/nvm.sh
+        nvm install --lts
+      args:
+        executable: /bin/bash
+        creates: "{{ ansible_facts['env']['HOME'] }}/.nvm/versions/node"
+
+    - name: Rust stable toolchain via rustup
+      ansible.builtin.command: /opt/homebrew/opt/rustup/bin/rustup default stable
+      args:
+        creates: "{{ ansible_facts['env']['HOME'] }}/.rustup/toolchains"
+
+    # Homebrew installs docker-compose as a standalone binary; this lets the
+    # docker CLI find it as the `docker compose` plugin.
+    - name: Docker CLI config directory
+      ansible.builtin.file:
+        path: "{{ ansible_facts['env']['HOME'] }}/.docker"
+        state: directory
+        mode: "0755"
+
+    - name: Docker CLI plugin directory (docker compose)
+      ansible.builtin.copy:
+        dest: "{{ ansible_facts['env']['HOME'] }}/.docker/config.json"
+        content: |
+          {
+            "cliPluginsExtraDirs": ["/opt/homebrew/lib/docker/cli-plugins"]
+          }
+        mode: "0644"
+        force: no
+
+  # Handlers run in this order, and only when a task that notifies them changed
+  # something. None of them fail the play: over SSH with nobody logged in at the
+  # screen, the UI processes are not running and there is nothing to restart.
+  handlers:
+    - name: Flush DNS cache
+      become: true
+      ansible.builtin.command: dscacheutil -flushcache
+
+    - name: Flush preferences cache
+      ansible.builtin.command: killall cfprefsd
+      failed_when: false
+
+    - name: Announce appearance change
+      ansible.builtin.command:
+        argv:
+          - osascript
+          - -l
+          - JavaScript
+          - -e
+          - |
+            ObjC.import("Foundation");
+            var nc = $.NSDistributedNotificationCenter.defaultCenter;
+            ["AppleIconAppearanceThemeChangedNotification",
+             "AppleInterfaceThemeChangedNotification",
+             "NSGlassEffectDiffusionDidChangeNotification"].forEach(function (name) {
+              nc.postNotificationNameObjectUserInfoDeliverImmediately($(name), null, null, true);
+            });
+      failed_when: false
+
+    # SIGKILL so Finder cannot flush stale in-memory settings over the new ones.
+    - name: Restart Finder
+      ansible.builtin.command: killall -9 Finder
+      failed_when: false
+
+    - name: Restart Dock
+      ansible.builtin.command: killall Dock
+      failed_when: false
+
+    - name: Restart Control Center
+      ansible.builtin.command: killall ControlCenter
+      failed_when: false
+
+    - name: Restart WindowManager
+      ansible.builtin.command: killall WindowManager
+      failed_when: false
+
+    - name: Restart Spotlight
+      ansible.builtin.shell: killall mds; killall Spotlight
+      become: true
+      failed_when: false
 
   roles:
     - name: geerlingguy.mac.homebrew
-    - name: geerlingguy.mac.mas
     - name: geerlingguy.mac.dock

@@ -1,67 +1,84 @@
 # macOS bootstrap
 
-Ansible-driven setup for a new Mac: Homebrew packages and casks, Mac App Store apps, Dock layout, shell tooling (Oh My Zsh, fonts, plugins), and system defaults via `defaults` in `os.sh`.
+Ansible setup for a headless macOS development box: Homebrew packages, Dock layout, shell tooling (Oh My Zsh, Powerlevel10k, fonts, plugins), dev toolchains, and macOS system defaults.
 
-The **golden-gate** branch targets **macOS 27 Golden Gate** (Apple Silicon). System apps live under `/System/Applications` (no `/Applications` shims except Safari), and `os.sh` uses Golden Gate preference keys for Liquid Glass, Spotlight, and Finder.
+The **golden-gate-headless** branch is a minimal variant of **golden-gate** for a development-only Mac that is mostly reached over SSH: no GUI apps, no Mac App Store installs, a Dock with only Safari, and CLI dev toolchains (Node via nvm, Python via uv, Go, Rust, and Docker via Colima). It targets **macOS 27 Golden Gate** on **Apple Silicon** (Homebrew at `/opt/homebrew`).
 
-## Prerequisites
+## Install
 
-- **macOS 27 Golden Gate** (this repo assumes **Apple Silicon** and Homebrew at `/opt/homebrew`, matching `init.sh`.)
-- **Full Disk Access for Terminal** before you run `update.sh`, or the playbook cannot read protected paths. Open **System Settings → Privacy & Security → Full Disk Access**, add **Terminal**, then restart Terminal if needed.
+On a fresh Mac with nothing installed (not even git), paste this into Terminal or an SSH session:
 
-## Quick start
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/muncherelli/macos-bootstrap/golden-gate-headless/install.sh)"
+```
 
-1. **Clone and enter the repo**
+That one command:
 
-   ```bash
-   git clone https://github.com/muncherelli/macos-bootstrap.git
-   cd macos-bootstrap
-   ```
+1. Installs **Homebrew**, which brings the Xcode Command Line Tools and with them git.
+2. Installs **uv**, which provides the pinned Python and the pinned Ansible.
+3. Clones this branch into `~/Development/macos-bootstrap`.
+4. Runs the playbook. You are asked for your password by the Homebrew installer and once more by Ansible.
 
-2. **First run: tooling and hostname**
+To set the computer name in the same run, add it to the end:
 
-   Run `init.sh` once on a clean machine. It installs **Homebrew** and **Ansible**, prompts for **Computer Name / HostName / LocalHostName**, and optionally reboots.
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/muncherelli/macos-bootstrap/golden-gate-headless/install.sh)" "" -e computer_name=devbox
+```
 
-   ```bash
-   ./init.sh
-   ```
+### Full Disk Access (Safari settings only)
 
-3. **Customize**
+Safari's preferences are sandboxed, so those few settings need Full Disk Access. Without it the run still completes and prints a notice; grant access and run again.
 
-   - **`playbook.yml`** — Homebrew formulae and casks, `mas` apps, Dock items, fonts, Zsh theme/plugins, and it runs `os.sh` as part of the play.
-   - **`os.sh`** — `defaults write` and other macOS UI and Finder preferences.
-
-4. **Apply software and settings**
-
-   ```bash
-   ./update.sh
-   ```
-
-   This installs Ansible collections from `requirements.yml`, then runs `ansible-playbook playbook.yml` (with `sudo` when prompted).
+- At the Mac: **System Settings → Privacy & Security → Full Disk Access**, add **Terminal**.
+- Over SSH: **System Settings → General → Sharing → Remote Login → (i) → Allow full disk access for remote users**.
 
 ## Re-running
 
-Use **`./update.sh`** whenever you change `playbook.yml`, `os.sh`, or roles. Run **`./init.sh`** only when you still need Homebrew/Ansible or want to change the machine name again.
-
-## Mac App Store apps
-
-The playbook uses **`mas`** for App Store installs. Sign in first if those tasks fail, for example:
+From the checkout, after editing anything:
 
 ```bash
-mas signin
+cd ~/Development/macos-bootstrap
+./install.sh                 # everything
+./install.sh --tags macos    # only the macOS settings
+```
+
+Run this way, `install.sh` uses the checkout as it is. Pasting the one-liner again instead pulls the latest commit of the branch first. Every task is idempotent, and services such as the Dock or Finder restart only when one of their settings changed.
+
+## Pinned Python and Ansible
+
+Ansible does not come from Homebrew. `uv` builds a virtualenv in `.venv/` from:
+
+| File | Pins |
+|------|------|
+| `.python-version` | The Python that runs Ansible and its modules |
+| `pyproject.toml` | The Ansible release |
+| `uv.lock` | Every Python dependency, exactly (created by the first run; commit it) |
+| `requirements.yml` | The `geerlingguy.mac` collection version, installed into `collections/` |
+
+To upgrade, change the version in the relevant file, run `uv lock`, and commit.
+
+## Always-on settings
+
+The playbook sets the Mac to never sleep on mains power, wake for network access, start up again after a power failure, and restart if it freezes, so it stays reachable over SSH. Screen Sharing is not touched; enable it by hand if you want it.
+
+## Containers
+
+Docker runs through **Colima** (a CLI-managed Linux VM) instead of Docker Desktop. Start it once after a boot, then use `docker` and `docker compose` as usual:
+
+```bash
+colima start
 ```
 
 ## Repository layout
 
 | File | Role |
 |------|------|
-| `init.sh` | Installs Homebrew and Ansible; optional hostname change and reboot |
-| `update.sh` | Verifies Full Disk Access; `ansible-galaxy install`; runs the playbook |
-| `playbook.yml` | Main Ansible play (Homebrew, `mas`, Dock, shell, invokes `os.sh`) |
-| `os.sh` | macOS defaults and preferences (called from the playbook) |
-| `requirements.yml` | Ansible collection dependencies (`geerlingguy.mac`) |
-| `ansible.cfg` | Local inventory and interpreter settings |
-| `inventory` | `localhost` over SSH local connection |
+| `install.sh` | The only shell script: Homebrew, uv, clone, then runs the playbook |
+| `playbook.yml` | Packages, computer name, Dock, shell, dev toolchains, power settings, restart handlers |
+| `tasks/macos.yml` | macOS UI, Finder, Dock, Spotlight and Safari preferences |
+| `pyproject.toml`, `.python-version` | Python and Ansible versions for uv |
+| `requirements.yml` | Ansible collection dependencies |
+| `ansible.cfg`, `inventory` | Local connection, using the same Python as Ansible itself |
 
 ## License
 
