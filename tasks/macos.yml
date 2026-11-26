@@ -313,9 +313,15 @@
       loop:
         # General → "Open safe files after downloading" off
         - { key: AutoOpenSafeDownloads, value: false }
-        # AutoFill → everything off
+        # AutoFill → Safari itself saves and fills nothing: no contact info, no
+        # credit cards, no other forms, and no Apple Passwords.
+        # AutoFillPasswords stays ON: it appears to be the master switch for any
+        # password filling in Safari, including a third-party password manager.
+        # AutoFillPasswordsInSafari OFF is what turns Apple's own filling off.
+        # (Undocumented by Apple; this mirrors a Mac where 1Password fills fine.)
         - { key: AutoFillFromAddressBook, value: false }
-        - { key: AutoFillPasswords, value: false }
+        - { key: AutoFillPasswords, value: true }
+        - { key: AutoFillPasswordsInSafari, value: false }
         - { key: AutoFillCreditCardData, value: false }
         - { key: AutoFillMiscellaneousForms, value: false }
         # Advanced → "Show features for web developers" (needs both domains)
