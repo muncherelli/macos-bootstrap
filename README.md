@@ -17,7 +17,7 @@ That one command:
 1. Installs **Homebrew**, which brings the Xcode Command Line Tools and with them git.
 2. Installs **uv**, which provides the pinned Python and the pinned Ansible.
 3. Clones this branch into `~/Development/macos-bootstrap`.
-4. Runs the playbook. You are asked for your password by the Homebrew installer and once more by Ansible.
+4. Hands off to `update.sh`, which runs the playbook. You are asked for your password by the Homebrew installer and once more by Ansible.
 
 To set the computer name in the same run, add it to the end:
 
@@ -32,17 +32,25 @@ Safari's preferences are sandboxed, so those few settings need Full Disk Access.
 - At the Mac: **System Settings → Privacy & Security → Full Disk Access**, add **Terminal**.
 - Over SSH: **System Settings → General → Sharing → Remote Login → (i) → Allow full disk access for remote users**.
 
-## Re-running
+### Running over SSH
 
-From the checkout, after editing anything:
+Everything except the desktop pieces works over SSH with nobody logged in at the screen. The Dock layout, the Safari settings and the Dock/Finder restarts need a desktop session; without one they are skipped and the run says so at the end. Log in at the screen (or over Screen Sharing) and run `./update.sh` again to finish them.
+
+`PATH` is set in `~/.zshenv`, so one-off commands such as `ssh devbox cargo --version` or `ssh devbox node -v` work, not only interactive shells.
+
+If FileVault is on, the Mac waits for a password after any unplanned restart (a power cut, for example) before it is reachable normally; "start up after a power failure" does not get past that screen. For a planned restart use `sudo fdesetup authrestart`.
+
+## Updating
+
+`install.sh` is only for that first paste. From then on, run `update.sh` from the checkout:
 
 ```bash
 cd ~/Development/macos-bootstrap
-./install.sh                 # everything
-./install.sh --tags macos    # only the macOS settings
+./update.sh                 # pull the latest commit, then apply everything
+./update.sh --tags macos    # pull, then apply only the macOS settings
 ```
 
-Run this way, `install.sh` uses the checkout as it is. Pasting the one-liner again instead pulls the latest commit of the branch first. Every task is idempotent, and services such as the Dock or Finder restart only when one of their settings changed.
+It pulls first, so changes pushed from another machine are picked up automatically. Uncommitted edits made on the box itself are kept and applied too, as long as they do not conflict with what is pulled. Every task is idempotent, and services such as the Dock or Finder restart only when one of their settings changed.
 
 ## Pinned Python and Ansible
 
@@ -73,7 +81,8 @@ colima start
 
 | File | Role |
 |------|------|
-| `install.sh` | The only shell script: Homebrew, uv, clone, then runs the playbook |
+| `install.sh` | First-time setup, pasted from this README: Homebrew, uv, clone, then `update.sh` |
+| `update.sh` | Pulls the latest commit and runs the playbook |
 | `playbook.yml` | Packages, computer name, Dock, shell, dev toolchains, power settings, restart handlers |
 | `tasks/macos.yml` | macOS UI, Finder, Dock, Spotlight and Safari preferences |
 | `pyproject.toml`, `.python-version` | Python and Ansible versions for uv |

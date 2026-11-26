@@ -1,16 +1,11 @@
 #!/bin/bash
-# The only shell script in this repo: it gets a bare Mac to the point where
-# Ansible can run, then Ansible does everything else.
-#
-# Fresh Mac (nothing installed, not even git), paste:
+# First-time setup for a fresh Mac (nothing installed, not even git).
+# Not meant to be run from the checkout; paste the one-liner from the README:
 #
 #   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/muncherelli/macos-bootstrap/golden-gate-headless/install.sh)"
 #
-# Later, from inside the checkout, apply local changes with:  ./install.sh
-#
-# Extra arguments go to ansible-playbook, for example:
-#   ./install.sh --tags macos
-#   ./install.sh -e computer_name=devbox
+# It installs Homebrew and uv, clones this branch, then hands off to update.sh,
+# which is what you run from then on. Extra arguments go to ansible-playbook.
 
 set -euo pipefail
 
@@ -18,36 +13,36 @@ BRANCH="golden-gate-headless"
 REPO="https://github.com/muncherelli/macos-bootstrap.git"
 DEST="${HOME}/Development/macos-bootstrap"
 
-# Homebrew: its installer also brings the Xcode Command Line Tools (and so git).
-if [[ ! -x /opt/homebrew/bin/brew ]]; then
-    echo "==> Installing Homebrew"
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-fi
-eval "$(/opt/homebrew/bin/brew shellenv)"
+die() { echo "error: $*" >&2; exit 1; }
 
-# uv: provides the pinned Python and the pinned Ansible (see pyproject.toml).
-command -v uv >/dev/null || { echo "==> Installing uv"; brew install uv; }
+# Everything is inside main(), called on the last line, so a download that was
+# cut short cannot run half of this script.
+main() {
+    # Homebrew: its installer also brings the Xcode Command Line Tools (git).
+    if [[ ! -x /opt/homebrew/bin/brew ]]; then
+        echo "==> Installing Homebrew"
+        local installer
+        installer="$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" ||
+            die "could not download the Homebrew installer"
+        /bin/bash -c "$installer"
+    fi
+    [[ -x /opt/homebrew/bin/brew ]] || die "Homebrew is not at /opt/homebrew after installation"
+    eval "$(/opt/homebrew/bin/brew shellenv)"
 
-# Run as a file inside a checkout: use that checkout as it is.
-# Piped from curl: clone the branch, or update an existing clone.
-here="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || true)"
-if [[ -n "${BASH_SOURCE[0]:-}" && -f "${here}/playbook.yml" ]]; then
-    cd "$here"
-elif [[ -d "${DEST}/.git" ]]; then
-    echo "==> Updating ${DEST} (${BRANCH})"
-    git -C "$DEST" fetch origin "$BRANCH"
-    git -C "$DEST" switch "$BRANCH"
-    git -C "$DEST" pull --ff-only origin "$BRANCH"
-    cd "$DEST"
-else
-    echo "==> Cloning ${BRANCH} into ${DEST}"
-    mkdir -p "$(dirname "$DEST")"
-    git clone --branch "$BRANCH" "$REPO" "$DEST"
-    cd "$DEST"
-fi
+    # Over SSH the Command Line Tools install can fail quietly; check for git.
+    xcode-select -p >/dev/null 2>&1 && git --version >/dev/null 2>&1 ||
+        die "git is not available. Install the Xcode Command Line Tools (xcode-select --install at the Mac) and run this again"
 
-echo "==> Installing Ansible collections"
-uv run ansible-galaxy collection install -r requirements.yml
+    # uv: provides the pinned Python and the pinned Ansible (see pyproject.toml).
+    command -v uv >/dev/null || { echo "==> Installing uv"; brew install uv; }
 
-echo "==> Running the playbook (asks for your sudo password)"
-exec uv run ansible-playbook playbook.yml --ask-become-pass "$@"
+    if [[ ! -d "${DEST}/.git" ]]; then
+        echo "==> Cloning ${BRANCH} into ${DEST}"
+        mkdir -p "$(dirname "$DEST")"
+        git clone --branch "$BRANCH" "$REPO" "$DEST"
+    fi
+
+    exec "${DEST}/update.sh" "$@"
+}
+
+main "$@"

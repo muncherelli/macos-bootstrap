@@ -1,10 +1,10 @@
 ---
 - name: Install/Update Software
-  hosts: localhost
+  hosts: all
 
   vars:
     # Computer Name / HostName / LocalHostName. Empty = leave the name alone.
-    # Set it here, or per run:  ./install.sh -e computer_name=devbox
+    # Set it here, or per run:  ./update.sh -e computer_name=devbox
     computer_name: ""
 
     # Headless dev box: the Dock holds Safari and nothing else. Everything that
@@ -20,6 +20,7 @@
       - btop
       - colima
       - docker
+      - docker-buildx
       - docker-compose
       - gh
       - go
@@ -36,6 +37,29 @@
     safari_plist: "{{ ansible_facts['env']['HOME'] }}/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist"
 
   pre_tasks:
+    # The Dock, Finder, Safari and friends only exist while someone is logged in
+    # at the screen (or over Screen Sharing). Over SSH with nobody logged in,
+    # the steps that need them are skipped and reported at the end.
+    - name: Check for a logged-in desktop session
+      ansible.builtin.command: launchctl print gui/{{ ansible_facts['user_uid'] }}
+      register: gui_domain
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      tags: [always]
+
+    - name: Check that the Dock has been set up for this account
+      ansible.builtin.stat:
+        path: "{{ ansible_facts['env']['HOME'] }}/Library/Preferences/com.apple.dock.plist"
+      register: dock_plist
+      tags: [always]
+
+    - name: Remember what is available
+      ansible.builtin.set_fact:
+        gui_session: "{{ gui_domain.rc == 0 }}"
+        dock_ready: "{{ dock_plist.stat.exists }}"
+      tags: [always]
+
     - name: dockutil utility
       become: false
       community.general.homebrew:
@@ -48,13 +72,14 @@
         set -o pipefail
         /opt/homebrew/bin/dockutil --list | awk -F'\t' '$1 != "Safari" { print $1 }' |
         while IFS= read -r item; do
-          /opt/homebrew/bin/dockutil --remove "$item" --no-restart </dev/null && echo "removed: $item"
+          /opt/homebrew/bin/dockutil --remove "$item" --no-restart </dev/null && echo "removed: $item" ||
+            echo "could not remove: $item" >&2
         done
-        exit 0
       args:
         executable: /bin/bash
       register: dock_clear
       changed_when: dock_clear.stdout != ""
+      when: dock_ready
       notify: Restart Dock
 
   tasks:
@@ -79,7 +104,7 @@
       become: true
       ansible.builtin.command: scutil --set {{ item.item }} {{ wanted | quote }}
       vars:
-        wanted: "{{ computer_name if item.item == 'ComputerName' else computer_name | regex_replace('[^A-Za-z0-9-]+', '-') }}"
+        wanted: "{{ computer_name if item.item == 'ComputerName' else computer_name | regex_replace('[^A-Za-z0-9-]+', '-') | regex_replace('^-+|-+$', '') }}"
       loop: "{{ current_names.results | default([]) }}"
       loop_control:
         label: "{{ item.item | default('') }}"
@@ -96,11 +121,20 @@
         access_time: preserve
 
     - name: Oh My Zsh
-      ansible.builtin.shell: sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh | sh -s -- --unattended
       args:
-        creates: ~/.oh-my-zsh
+        executable: /bin/bash
+        creates: "{{ ansible_facts['env']['HOME'] }}/.oh-my-zsh/oh-my-zsh.sh"
       environment:
         PATH: "{{ ansible_facts['env']['PATH'] }}"
+
+    - name: Fonts directory
+      ansible.builtin.file:
+        path: "{{ ansible_facts['env']['HOME'] }}/Library/Fonts"
+        state: directory
+        mode: "0755"
 
     # Only needed when using Terminal on this Mac itself. Over SSH the font has
     # to be installed on the machine you are connecting from.
@@ -173,16 +207,31 @@
         state: present
         backrefs: yes
 
-    - name: Dev toolchain shell configuration in .zshrc
+    # ~/.zshenv is the only file zsh reads for `ssh host some-command`, so PATH
+    # lives there. nvm is a shell function and is loaded for interactive shells
+    # only; ~/.nvm/current-bin is kept pointing at the default Node so that
+    # `ssh host node` works too.
+    - name: PATH for all shells in .zshenv
+      ansible.builtin.blockinfile:
+        path: "{{ ansible_facts['env']['HOME'] }}/.zshenv"
+        create: yes
+        mode: "0644"
+        block: |
+          typeset -U path
+          path=(
+            "$HOME/.cargo/bin" /opt/homebrew/opt/rustup/bin "$HOME/go/bin"
+            "$HOME/.nvm/current-bin" /opt/homebrew/bin /opt/homebrew/sbin
+            $path
+          )
+        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR PATH"
+
+    - name: nvm for interactive shells in .zshrc
       ansible.builtin.blockinfile:
         path: "{{ ansible_facts['env']['HOME'] }}/.zshrc"
         block: |
-          # Node (nvm)
           export NVM_DIR="$HOME/.nvm"
           [ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && \. "/opt/homebrew/opt/nvm/nvm.sh"
           [ -s "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm" ] && \. "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm"
-          # Rust (rustup proxies, then cargo-installed binaries) and Go binaries
-          export PATH="$HOME/.cargo/bin:/opt/homebrew/opt/rustup/bin:$HOME/go/bin:$PATH"
         marker: "# {mark} ANSIBLE MANAGED BLOCK FOR DEV TOOLCHAINS"
 
     - name: nvm directory
@@ -195,15 +244,18 @@
       ansible.builtin.shell: |
         export NVM_DIR="$HOME/.nvm"
         . /opt/homebrew/opt/nvm/nvm.sh
-        nvm install --lts
+        nvm install --lts 2>&1
+        nvm alias default 'lts/*' >/dev/null
+        ln -sfn "$(dirname "$(nvm which default)")" "$NVM_DIR/current-bin"
       args:
         executable: /bin/bash
-        creates: "{{ ansible_facts['env']['HOME'] }}/.nvm/versions/node"
+      register: nvm_install
+      changed_when: "'is already installed' not in nvm_install.stdout"
 
     - name: Rust stable toolchain via rustup
       ansible.builtin.command: /opt/homebrew/opt/rustup/bin/rustup default stable
-      args:
-        creates: "{{ ansible_facts['env']['HOME'] }}/.rustup/toolchains"
+      register: rustup_default
+      changed_when: "'unchanged' not in (rustup_default.stdout + rustup_default.stderr)"
 
     # Homebrew installs docker-compose as a standalone binary; this lets the
     # docker CLI find it as the `docker compose` plugin.
@@ -222,6 +274,17 @@
           }
         mode: "0644"
         force: no
+
+  post_tasks:
+    - name: Steps skipped because nobody is logged in at the screen
+      ansible.builtin.debug:
+        msg: >-
+          No desktop session was found, so the Dock layout{{ '' if dock_ready else ' (never initialised for this account)' }},
+          the Safari settings and the restarts of Dock, Finder, Control Center and
+          WindowManager were skipped or deferred. Log in at the screen (or over
+          Screen Sharing) and run ./update.sh again to finish them.
+      when: not gui_session or not dock_ready
+      tags: [always]
 
   # Handlers run in this order, and only when a task that notifies them changed
   # something. None of them fail the play: over SSH with nobody logged in at the
@@ -251,23 +314,28 @@
               nc.postNotificationNameObjectUserInfoDeliverImmediately($(name), null, null, true);
             });
       failed_when: false
+      when: gui_session
 
     # SIGKILL so Finder cannot flush stale in-memory settings over the new ones.
     - name: Restart Finder
       ansible.builtin.command: killall -9 Finder
       failed_when: false
+      when: gui_session
 
     - name: Restart Dock
       ansible.builtin.command: killall Dock
       failed_when: false
+      when: gui_session
 
     - name: Restart Control Center
       ansible.builtin.command: killall ControlCenter
       failed_when: false
+      when: gui_session
 
     - name: Restart WindowManager
       ansible.builtin.command: killall WindowManager
       failed_when: false
+      when: gui_session
 
     - name: Restart Spotlight
       ansible.builtin.shell: killall mds; killall Spotlight
@@ -277,3 +345,4 @@
   roles:
     - name: geerlingguy.mac.homebrew
     - name: geerlingguy.mac.dock
+      when: dock_ready

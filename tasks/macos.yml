@@ -285,20 +285,22 @@
 # only writable with Full Disk Access. Safari must not be running, or it writes
 # its own values back on quit.
 - name: Quit Safari
-  ansible.builtin.command: osascript -e 'quit app "Safari"'
+  ansible.builtin.command: pkill -x Safari
   changed_when: false
   failed_when: false
 
-# The container plist does not exist until Safari has run once.
+# The container plist does not exist until Safari has run once, which needs a
+# desktop session.
 - name: Launch Safari once so its preferences file exists
   ansible.builtin.shell: |
     open -gj -a Safari
     sleep 3
-    osascript -e 'quit app "Safari"'
+    pkill -x Safari
     sleep 1
   args:
     creates: "{{ safari_plist }}"
   failed_when: false
+  when: gui_session
 
 - name: Safari settings
   block:
@@ -330,4 +332,4 @@
         msg: >-
           Safari preferences are not writable. Grant Full Disk Access (Terminal,
           or "Allow full disk access for remote users" under Remote Login when
-          running over SSH) and run ./install.sh again.
+          running over SSH) and run ./update.sh again.
