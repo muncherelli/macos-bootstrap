@@ -45,6 +45,7 @@
 
     homebrew_cask_apps:
       - iterm2
+      - keka
 
     safari_plist: "{{ ansible_facts['env']['HOME'] }}/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist"
 
