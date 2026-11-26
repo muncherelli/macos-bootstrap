@@ -2,6 +2,14 @@
 - name: Install/Update Software
   hosts: all
 
+  # A fresh macOS install stores some of these settings with a different type
+  # than the one written here (for example an integer 0 where a boolean is
+  # wanted). Overwrite with the wanted type, as `defaults write` would, and do
+  # not stop on the mismatch.
+  module_defaults:
+    community.general.osx_defaults:
+      check_type: false
+
   vars:
     # Computer Name / HostName / LocalHostName. Empty = leave the name alone.
     # Set it here, or per run:  ./update.sh -e computer_name=devbox
