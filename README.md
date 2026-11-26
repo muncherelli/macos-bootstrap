@@ -2,7 +2,7 @@
 
 Ansible setup for a headless macOS development box: Homebrew packages, Dock layout, shell tooling (Oh My Zsh, Powerlevel10k, fonts, plugins), dev toolchains, and macOS system defaults.
 
-The **golden-gate-headless** branch is a minimal variant of **golden-gate** for a development-only Mac that is mostly reached over SSH: no GUI apps, no Mac App Store installs, a Dock with only Safari, and CLI dev toolchains (Node via nvm, Python via uv, Go, Rust, and Docker via Colima). It targets **macOS 27 Golden Gate** on **Apple Silicon** (Homebrew at `/opt/homebrew`).
+The **golden-gate-headless** branch is a minimal variant of **golden-gate** for a development-only Mac that is mostly reached over SSH: no GUI apps, no Mac App Store installs, a Dock with only Safari and Terminal, and CLI dev toolchains (Node via nvm, Python via uv, Go, Rust, and Docker via Colima). It targets **macOS 27 Golden Gate** on **Apple Silicon** (Homebrew at `/opt/homebrew`).
 
 ## Install
 

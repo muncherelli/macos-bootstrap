@@ -15,14 +15,17 @@
     # Set it here, or per run:  ./update.sh -e computer_name=devbox
     computer_name: ""
 
-    # Headless dev box: the Dock holds Safari and nothing else. Everything that
-    # is not Safari is stripped by the "Clear the Dock" pre-task below, so there
+    # Headless dev box: the Dock holds only the items listed in dockitems_persist.
+    # Everything else is stripped by the "Clear the Dock" pre-task below, so there
     # is no remove list to maintain as macOS adds new default icons.
     dockitems_remove: []
     dockitems_persist:
       - name: "Safari"
         path: "/Applications/Safari.app"
         pos: 1
+      - name: "Terminal"
+        path: "/System/Applications/Utilities/Terminal.app"
+        pos: 2
 
     homebrew_installed_packages:
       - btop
@@ -74,17 +77,21 @@
         name: dockutil
         state: present
 
-    - name: Clear the Dock (everything except Safari)
+    - name: Clear the Dock (everything not in dockitems_persist)
       become: false
       ansible.builtin.shell: |
         set -o pipefail
-        /opt/homebrew/bin/dockutil --list | awk -F'\t' '$1 != "Safari" { print $1 }' |
+        /opt/homebrew/bin/dockutil --list |
+        awk -F'\t' -v keep="$KEEP" 'BEGIN { split(keep, k, "|"); for (i in k) wanted[k[i]] = 1 }
+                                    !($1 in wanted) { print $1 }' |
         while IFS= read -r item; do
           /opt/homebrew/bin/dockutil --remove "$item" --no-restart </dev/null && echo "removed: $item" ||
             echo "could not remove: $item" >&2
         done
       args:
         executable: /bin/bash
+      environment:
+        KEEP: "{{ dockitems_persist | map(attribute='name') | join('|') }}"
       register: dock_clear
       changed_when: dock_clear.stdout != ""
       when: dock_ready
