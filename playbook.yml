@@ -23,8 +23,8 @@
       - name: "Safari"
         path: "/Applications/Safari.app"
         pos: 1
-      - name: "Terminal"
-        path: "/System/Applications/Utilities/Terminal.app"
+      - name: "iTerm"
+        path: "/Applications/iTerm.app"
         pos: 2
 
     homebrew_installed_packages:
@@ -43,7 +43,8 @@
       - uv
       - wget
 
-    homebrew_cask_apps: []
+    homebrew_cask_apps:
+      - iterm2
 
     safari_plist: "{{ ansible_facts['env']['HOME'] }}/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist"
 

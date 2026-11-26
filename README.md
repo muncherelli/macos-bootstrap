@@ -2,7 +2,7 @@
 
 Ansible setup for a headless macOS development box: Homebrew packages, Dock layout, shell tooling (Oh My Zsh, Powerlevel10k, fonts, plugins), dev toolchains, and macOS system defaults.
 
-The **golden-gate-headless** branch is a minimal variant of **golden-gate** for a development-only Mac that is mostly reached over SSH: no GUI apps, no Mac App Store installs, a Dock with only Safari and Terminal, and CLI dev toolchains (Node via nvm, Python via uv, Go, Rust, and Docker via Colima). It targets **macOS 27 Golden Gate** on **Apple Silicon** (Homebrew at `/opt/homebrew`).
+The **golden-gate-headless** branch is a minimal variant of **golden-gate** for a development-only Mac that is mostly reached over SSH: no GUI apps beyond iTerm2, no Mac App Store installs, a Dock with only Safari and iTerm2, and CLI dev toolchains (Node via nvm, Python via uv, Go, Rust, and Docker via Colima). It targets **macOS 27 Golden Gate** on **Apple Silicon** (Homebrew at `/opt/homebrew`).
 
 ## Install
 
@@ -29,7 +29,7 @@ To set the computer name in the same run, add it to the end:
 
 Safari's preferences are sandboxed, so those few settings need Full Disk Access. Without it the run still completes and prints a notice; grant access and run again.
 
-- At the Mac: **System Settings → Privacy & Security → Full Disk Access**, add **Terminal**.
+- At the Mac: **System Settings → Privacy & Security → Full Disk Access**, add the terminal app you run `update.sh` from (**Terminal** or **iTerm**).
 - Over SSH: **System Settings → General → Sharing → Remote Login → (i) → Allow full disk access for remote users**.
 
 ### Running over SSH
