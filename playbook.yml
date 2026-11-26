@@ -161,6 +161,31 @@
         line: 'ZSH_THEME="powerlevel10k/powerlevel10k"'
         create: yes
 
+    # The prompt's look, generated once by `p10k configure`. Seeding it stops the
+    # configuration wizard from starting on first login. It is only copied when
+    # missing, so a later `p10k configure` on the box is kept.
+    - name: Powerlevel10k prompt configuration
+      ansible.builtin.copy:
+        src: files/p10k.zsh
+        dest: "{{ ansible_facts['env']['HOME'] }}/.p10k.zsh"
+        mode: "0644"
+        force: no
+
+    - name: Powerlevel10k instant prompt at the top of .zshrc
+      ansible.builtin.blockinfile:
+        path: "{{ ansible_facts['env']['HOME'] }}/.zshrc"
+        insertbefore: BOF
+        block: |
+          if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+            source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+          fi
+        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR P10K INSTANT PROMPT"
+
+    - name: Load the Powerlevel10k configuration from .zshrc
+      ansible.builtin.lineinfile:
+        path: "{{ ansible_facts['env']['HOME'] }}/.zshrc"
+        line: "[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh"
+
     - name: macOS system defaults
       ansible.builtin.import_tasks: tasks/macos.yml
       tags: [macos]
